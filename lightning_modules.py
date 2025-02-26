@@ -1,0 +1,287 @@
+
+import torch
+import torch.nn as nn
+import pytorch_lightning as pl
+from copy import deepcopy
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts, CyclicLR, LambdaLR
+import numpy as np
+from sklearn.metrics import r2_score
+
+class BaseLightningModule(pl.LightningModule):
+    def __init__(self, model, loss_fn, lr=0.0001, scheduler_type='cosine', batch_size=32, element_names=None, optimizer_kwargs = {}, **kwargs):
+        super().__init__()
+        self.model = model
+        self.loss_fn = loss_fn  # Loss function is now dynamic
+        self.lr = lr
+        self.scheduler_type = scheduler_type
+        self.batch_size = batch_size
+        self.best_checkpoints = []
+        self.element_names = element_names if element_names is not None else []
+        self.loss_name = ''
+        self.optimizer_kwargs = optimizer_kwargs
+
+
+    def forward(self, x, cond):
+        return self.model(x)
+
+    def compute_loss(self, preds, y):
+        """Generic loss computation method to be overridden if needed."""
+        return self.loss_fn(preds, y)
+
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        preds = self.forward(x, cond=y)
+        loss = self.compute_loss(preds, y)
+        self.log(f"train_{self.loss_name}", loss, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        preds = self.forward(x, cond=y)
+        loss = self.compute_loss(preds, y)
+        self.log(f"val_{self.loss_name}", loss, prog_bar=True)
+        self.log_custom_evals(preds, y)
+        return loss
+    
+    def log_custom_evals(self, preds, y):
+        pass
+
+    def configure_optimizers(self):
+        # paper is weight_decay=3.53e-7
+        default_optimizer_kwargs = dict(weight_decay=3.53e-7, betas=(0.5, 0.999))
+        optimizer_kwargs = {**default_optimizer_kwargs, **self.optimizer_kwargs}
+        print(optimizer_kwargs)
+        optimizer = AdamW(self.model.parameters(), lr=self.lr, **optimizer_kwargs)
+        interval = "step"
+
+        if self.scheduler_type == 'cosine':
+            scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=1000, eta_min=1e-9)
+        elif self.scheduler_type == 'cosine_2mult':
+            scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=1000, eta_min=1e-9, T_mult=2)
+        elif self.scheduler_type == 'cyclic':
+            scheduler = CyclicLR(
+                optimizer, base_lr=1e-9, max_lr=self.lr,
+                step_size_up=500, step_size_down=500,
+                cycle_momentum=False
+            )
+        else:  # Default: Warm-up + Exponential Decay
+            warmup_steps = 500
+            gamma = 0.98  
+
+            def lr_lambda(step):
+                if step < warmup_steps:
+                    return step / warmup_steps  
+                else:
+                    return gamma ** (0.01 * (step - warmup_steps))
+
+            scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": interval,
+            }
+        }
+
+
+class RegressionLightningModule(BaseLightningModule):
+    def __init__(self, model, lr=0.0001, scheduler_type='cosine', batch_size=32, element_names=None, **kwargs):
+        super().__init__(model, loss_fn=torch.nn.MSELoss(), lr=lr, scheduler_type=scheduler_type, batch_size=batch_size, element_names=element_names)
+        self.loss_name = "loss"
+    def log_r2_eval(self, preds, y):
+        """Logs R² scores for each output element if applicable."""
+        if not self.element_names:
+            return
+        
+        preds_np = preds.detach().cpu().numpy()
+        y_np = y.detach().cpu().numpy()
+        for i, element in enumerate(self.element_names):
+            r2 = r2_score(y_np[:, i], preds_np[:, i])
+            self.log(f"R²_{element}", r2, prog_bar=False)
+    def log_custom_evals(self, preds, y):
+        self.log_r2_eval(preds, y)
+
+    def compute_loss(self, preds, y):
+        return torch.log(self.loss_fn(preds, y))  # Log-transformed MSE loss
+
+class GaussianLightningModule(BaseLightningModule):
+    def __init__(self, model, lr=0.0001, scheduler_type='cosine', batch_size=32, element_names=None, num_outputs=2, **kwargs):
+        super().__init__(model, loss_fn=torch.nn.MSELoss(), lr=lr, scheduler_type=scheduler_type, batch_size=batch_size, element_names=element_names)
+        self.loss_name = "loss"
+        self.num_outputs = num_outputs
+    def log_r2_eval(self, preds, y):
+        """Logs R² scores for each output element if applicable."""
+        if not self.element_names:
+            return
+        
+        preds_np = preds.detach().cpu().numpy()
+        y_np = y.detach().cpu().numpy()
+        for i, element in enumerate(self.element_names):
+            r2 = r2_score(y_np[:, i], preds_np[:, i])
+            self.log(f"R²_{element}", r2, prog_bar=False)
+    def log_custom_evals(self, preds, y):
+        self.log_r2_eval(preds, y)
+
+    def compute_loss(self, preds, y):
+        y_NN = preds[:, :self.num_outputs]
+        e_NN = preds[:, self.num_outputs:]
+        loss1 = torch.mean((y_NN - y)**2,                axis=0)
+        loss2 = torch.mean(((y_NN - y)**2 - e_NN**2)**2, axis=0)
+        loss  = torch.mean(torch.log(loss1) + torch.log(loss2))
+        return loss
+
+
+from custom_sbi import build_maf, build_maf_rqs, build_nsf
+from nflows import flows, transforms
+from typing import NamedTuple
+from torch.optim import Adam, AdamW
+import torch
+from sbi import utils as utils
+import torch.nn.functional as F
+import torch.nn.init as init
+import torch.nn as nn
+import time
+
+from nflows.distributions.normal import StandardNormal
+
+def prepare_identity_maf(extra_blocks_builder, embeddings, bounds=(0., 1.), n_epochs=250, device='cpu', dim=2, loss_threshold=0.01):
+    distribution = StandardNormal(shape=(dim,))
+    min_loss = float('inf')
+
+    print('Training identity maf blocks', flush=True)
+    while min_loss > loss_threshold:
+        extra_blocks = extra_blocks_builder()
+        reinitialise_made_final_layers(extra_blocks, scale=1e-2)
+        print(f"Reinitializing due to high loss...; {min_loss}", flush=True)
+        random_samples = distribution.sample(embeddings.shape[0]).to(device)
+        embeddings = embeddings.to(device)
+        neural_net = flows.Flow(extra_blocks._transform, distribution).to(device)
+        opt = torch.optim.Adam(neural_net._transform.parameters(), lr=0.001, weight_decay=0.1)
+
+        def identity_loss_with_jacobian(model, x, y):
+            z, _ = model._transform(x, y)
+            loss_identity = F.mse_loss(z, x)  # Identity mapping loss
+            return loss_identity
+        
+        min_loss = float('inf')
+        for epoch in range(n_epochs):
+            opt.zero_grad()
+            loss = identity_loss_with_jacobian(neural_net, random_samples, embeddings)
+            loss.backward()
+            opt.step()
+            min_loss = min(min_loss, loss.item())
+            
+            if epoch % 50 == 0:
+                pass
+                # print(f"Fine-tune Epoch {epoch + 1}, Loss: {loss.item()}, Min Loss: {min_loss}")
+        
+        
+    print(f'Reached acceptable loss: {min_loss}', flush=True)
+    return neural_net
+
+def reinitialise_final_layer(layer, scale=1e-5):
+    """Reinitialise the final layer of a MADE block."""
+    if isinstance(layer, torch.nn.Linear) or 'MaskedLinear' in layer.__class__.__name__:
+        init.uniform_(layer.weight, a=-scale, b=scale)  # Small random weights
+        if layer.bias is not None:
+            init.uniform_(layer.bias, a=-scale, b=scale)
+def reinitialise_made_final_layers(model, scale=1e-5):
+    """Reinitialise all 'final_layer' instances in a MADE block."""
+    for name, module in model.named_modules():
+        # if 'final_layer' in name:  # Check if the name matches 'final_layer'
+            reinitialise_final_layer(module,scale)
+
+from functools import partial
+
+class NDELightningModule(BaseLightningModule):
+    flow_type_map = {"nsf": build_nsf, "maf": build_maf, "rqs": build_maf_rqs}
+
+    def __init__(self, model, conditioning_dim, lr=0.0001, scheduler_type='cosine', batch_size=32, test_dataloader=None, flow_type='nsf', num_extra_blocks=None, checkpoint_path=None, **kwargs):
+        super().__init__(model, loss_fn=None, lr=lr, scheduler_type=scheduler_type, batch_size=batch_size, **kwargs)
+        embedding_net = model if model is not None else nn.Identity()
+        self.conditioning_dim = conditioning_dim
+        self.build_flow = self.flow_type_map[flow_type]  # Function to build the normalizing flow model
+        self.flow_kwargs = {"conditional_dim": self.conditioning_dim}
+        self.test_dataloader = test_dataloader
+        self.loss_name = "log_prob"
+        self.set_up_model(embedding_net)
+        self.test_loss_values = []
+        if num_extra_blocks:
+            y_dataset, x_dataset = self.test_dataloader.dataset.tensors
+            self.append_maf_blocks(x_dataset[:10], y_dataset[:10], num_extra_blocks, (), 'cuda')
+        if checkpoint_path:
+            self.load_from_checkpoint(checkpoint_path)
+
+    def set_up_model(self, embedding_net):
+        """Builds the flow model dynamically when training starts."""
+        y_dataset, x_dataset = self.test_dataloader.dataset.tensors
+        self.model = self.build_flow(x_dataset, y_dataset, num_transforms=4, z_score_x=None, z_score_y=None, 
+                                     embedding_net=embedding_net, hidden_features=128, use_batch_norm=True, 
+                                     **self.flow_kwargs)
+        print("Finished model setup", flush=True)
+
+    def load_from_checkpoint(self, checkpoint_path):
+        """Loads model weights from a given checkpoint."""
+        checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))  # Adjust device as needed
+        self.load_state_dict(checkpoint['state_dict'])  # Ensure the key matches the saved checkpoint format
+        print(f"Loaded model from {checkpoint_path}")
+
+    def append_maf_blocks(self, cheap_x_dataset, cheap_y_dataset, num_extra_blocks, bounds, device):
+        """Appends extra MAF blocks to the pretrained model."""
+        if num_extra_blocks > 0:
+            embeddings = self.model._embedding_net(cheap_y_dataset.to(device)).detach().cpu()
+            extra_blocks_builder = partial(build_maf,
+                cheap_x_dataset, embeddings, num_transforms=num_extra_blocks, use_residual_blocks=True, 
+                z_score_x=None, z_score_y=None
+            )
+            
+            extra_blocks = prepare_identity_maf(extra_blocks_builder, embeddings, bounds=bounds, n_epochs=251, device=device)
+            
+            new_flow = flows.Flow(
+                transform=transforms.CompositeTransform((self.model._transform, extra_blocks._transform)),
+                distribution=self.model._distribution,
+                embedding_net=self.model._embedding_net
+            )
+            
+            self.model = new_flow
+
+    def compute_loss(self, preds, y):   
+        """Uses log probability as the loss for density estimation."""
+        return -preds.mean()  # Negative log-likelihood loss
+
+    def forward(self, x, cond=None):
+        return self.model.log_prob(cond, x)
+
+    # def predict_step(self, batch, batch_idx):
+    #     batch = self.transfer_batch_to_device(batch, self.device, 0)
+    #     x, cond = batch
+    #     return self.forward(x, cond)
+
+    def on_validation_epoch_end(self):
+        """Logs custom evaluation metrics at the end of each validation epoch."""
+        if self.test_dataloader is None:
+            return  # Skip if no test dataloader is provided
+
+        self.model.eval()  # Ensure model is in eval mode
+        with torch.no_grad():
+            avg_log_prob = self.compute_avg_log_prob()
+        if avg_log_prob is not None:
+            self.test_loss_values.append(avg_log_prob)
+
+    def compute_avg_log_prob(self):
+        """Computes the average log probability over the test dataset."""
+        if self.trainer.sanity_checking:  # optional skip
+            return
+        predictions = []
+        for batch in self.test_dataloader:
+            batch = self.transfer_batch_to_device(batch, self.device, 0)
+            predictions.append(self.forward(batch[0], batch[1]))
+        all_log_probs = torch.cat(predictions, dim=0)  # Collect predictions
+        avg_log_prob = all_log_probs.mean().item()
+        return avg_log_prob
+
+    def log_custom_evals(self, preds, y):
+        if len(self.test_loss_values) > 0:
+            self.log("test_log_prob", self.test_loss_values.pop())
