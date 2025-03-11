@@ -94,7 +94,7 @@ class MAFPretrainFineTune(flows.Flow):
         self.cheap_y_dataset = cheap_y
         prior = utils.BoxUniform(low=self.bounds[0] * torch.ones(4), high=self.bounds[1] * torch.ones(4), device=self.device)
         inference_method = CustomSNPE_C(prior=prior, device=self.device)
-        neural_net = self.build_flow(cheap_x, cheap_y, num_transforms=self.config.num_initial_blocks, z_score_x=None, z_score_y=None, embedding_net=self.embedding_net, hidden_features=128, use_batch_norm=True, **self.flow_kwargs)
+        neural_net = self.build_flow(cheap_x, cheap_y, num_transforms=self.config.num_initial_blocks, z_score_x=None, z_score_y=None, embedding_net=self.embedding_net, hidden_features=128, use_batch_norm=False, **self.flow_kwargs)
        # Implement training loop (omitted for brevity)
         inference_method.append_simulations(cheap_x, cheap_y)
         pretrain_opts = [AdamW(neural_net.parameters(), lr=lr, weight_decay=self.config.pretrain_wd)]

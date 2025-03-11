@@ -786,6 +786,62 @@ def build_nsf(
     neural_net = flows.Flow(transform, distribution, embedding_net)
 
     return neural_net
+from nflows.utils import torchutils
+from torch.nn import functional as F
+
+import torch
+import torch.nn as nn
+from nflows import transforms
+from nflows.transforms.autoregressive import MaskedAffineAutoregressiveTransform
+from nflows.utils import torchutils
+
+
+class ResidualMaskedAutoregressiveTransform(MaskedAffineAutoregressiveTransform):
+    """A MADE-based autoregressive transform that starts as an identity function,
+    while also handling a predefined permutation of inputs."""
+
+    def __init__(self, perm_indices=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # stor
+        # self.perm_indices = perm_indices  # Store permutation indices
+        # store perm_indices as weights with no grad to allow for checkpointing
+        self.register_buffer("perm_indices", torch.tensor(perm_indices, dtype=torch.long))
+
+    def _elementwise_forward(self, inputs, autoregressive_params):
+        """Ensure near-identity initialization and handle input permutation."""
+        # if self.perm_indices is not None:
+        #     inputs = inputs[:, torch.argsort(self.perm_indices)]  # Apply permutation
+
+        unconstrained_scale, shift = self._unconstrained_scale_and_shift(
+            autoregressive_params
+        )
+        scale = 1 + unconstrained_scale + self._epsilon
+        log_scale = torch.log(scale)
+        outputs = scale * inputs + shift
+        logabsdet = torchutils.sum_except_batch(log_scale, num_batch_dims=1)
+
+        if self.perm_indices is not None:
+            outputs = outputs[:, torch.argsort(self.perm_indices)]  # Reverse permutation
+
+        return outputs, logabsdet
+
+    def _elementwise_inverse(self, inputs, autoregressive_params):
+        """Ensure near-identity inverse transform and handle input permutation."""
+        if self.perm_indices is not None:
+            inputs = inputs[:, self.perm_indices]  # Apply permutation
+        unconstrained_scale, shift = self._unconstrained_scale_and_shift(
+            autoregressive_params
+        )
+        scale = 1 + unconstrained_scale + self._epsilon
+        log_scale = torch.log(scale)
+        outputs = (inputs - shift) / scale
+        logabsdet = -torchutils.sum_except_batch(log_scale, num_batch_dims=1)
+
+        # if self.perm_indices is not None:
+        #     outputs = outputs[:, torch.argsort(self.perm_indices)]  # Reverse permutation
+
+        return outputs, logabsdet
+
 
 def build_maf(
     batch_x: Tensor,
@@ -799,6 +855,8 @@ def build_maf(
     dropout_probability: float = 0.0,
     use_batch_norm: bool = False,
     use_residual_blocks: bool = False,
+    use_identity_made: bool = False,
+    random_permutation: bool = True,
     **kwargs,
 ) -> nn.Module:
     """Builds MAF p(x|y).
@@ -831,27 +889,38 @@ def build_maf(
     # check_data_device(batch_x, batch_y)
     # check_embedding_net_device(embedding_net=embedding_net, datum=batch_y)
     y_numel = embedding_net(batch_y[:1]).numel()
+    made_constructor = MaskedAffineAutoregressiveTransform if  not use_identity_made else ResidualMaskedAutoregressiveTransform
 
     if x_numel == 1:
         warn("In one-dimensional output space, this flow is limited to Gaussians")
 
     transform_list = []
     for _ in range(num_transforms):
-        block = [
-            transforms.MaskedAffineAutoregressiveTransform(
-                features=x_numel,
-                hidden_features=hidden_features,
-                context_features=y_numel,
-                num_blocks=num_blocks,
-                use_residual_blocks=use_residual_blocks,
-                random_mask=False,
-                activation=tanh,
-                dropout_probability=dropout_probability,
-                use_batch_norm=use_batch_norm,
-            ),
-            transforms.RandomPermutation(features=x_numel),
-        ]
-        transform_list += block
+            perm_indices = None  # Default: no permutation
+
+            if random_permutation:
+                perm_transform = transforms.RandomPermutation(features=x_numel)
+                perm_indices = perm_transform._permutation  # Extract permutation order
+
+            block = [
+                made_constructor(
+                    features=x_numel,
+                    hidden_features=hidden_features,
+                    context_features=y_numel,
+                    num_blocks=num_blocks,
+                    use_residual_blocks=use_residual_blocks,
+                    random_mask=False,
+                    activation=torch.tanh,
+                    dropout_probability=dropout_probability,
+                    use_batch_norm=use_batch_norm,
+                    **dict(perm_indices=perm_indices) if use_identity_made else {},  # Pass permutation indices
+                )
+            ]
+
+            if random_permutation:
+                block.append(perm_transform)  # Add the actual permutation layer
+
+            transform_list += block
 
     z_score_x_bool, structured_x = z_score_parser(z_score_x)
     if z_score_x_bool:
