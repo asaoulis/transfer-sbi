@@ -1,5 +1,4 @@
 
-# %%
 import torch
 import torch.nn as nn
 from torchvision import models
@@ -28,12 +27,6 @@ class ConvBlock(nn.Module):
 
     def forward(self, x):
         return self.block(x)
-
-import torch.nn as nn
-from torchvision import models
-
-import torch
-import torch.nn as nn
 
 class ConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels, first_block=False):
@@ -206,7 +199,6 @@ def build_resnet(num_outputs, pretrained=True):
     
     resnet = models.resnet18(pretrained=pretrained)
 
-
     # Copy weights from the original layer
     original_weights = resnet.conv1.weight.data
 
@@ -265,3 +257,9 @@ def build_convnext(num_outputs, pretrained=True):
     )
     
     return convnext
+
+_MODEL_BUILDERS = {
+    "o3": lambda num_outputs, **kwargs: models.model_o3_err(num_outputs, hidden=12).to(device='cuda'),
+    "resnet": lambda num_outputs, pretrained=True, **kwargs: build_resnet(num_outputs, pretrained=pretrained),
+    "convnext": lambda num_outputs, pretrained=True, **kwargs: build_convnext(num_outputs, pretrained=pretrained)
+}

@@ -60,13 +60,6 @@ class DataScaler:
     def transform_standard(self, X):
         return (X - self.mean) / self.std
 
-def create_dummy_variables(x, y):
-    kurt_val = np.array([kurtosis(field.flatten()) for field in y])
-    fft_power = np.abs(fftshift(fft2(y), axes=(1, 2)))**2
-    high_freq_power = fft_power[:, 120:136, 120:136].mean(axis=(1, 2))
-    grad_mag_mean = np.array([gaussian_gradient_magnitude(field, sigma=1).mean() for field in y])
-    return np.hstack([x, kurt_val[:, None], high_freq_power[:, None], grad_mag_mean[:, None]]), y
-
 def build_train_test_split(x, y, n_test):
     np.random.seed(0)
     test_ids = np.random.choice(x.shape[0], n_test, replace=False)
@@ -88,7 +81,7 @@ from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts, CyclicLR
 from torch.utils.data import DataLoader, random_split, TensorDataset
 from torchvision import transforms
 
-import compressors as models
+import train.compressors as models
 
 def get_scalers(dataset_name):
     dataset = DatasetLoader(dataset_name)
@@ -146,7 +139,7 @@ class AugmentDataset(torch.utils.data.Dataset):
             image = self.transform(image)
         return image, label
 
-from lightning_modules import RegressionLightningModule, NDELightningModule, GaussianLightningModule
+from train.lightning_modules import RegressionLightningModule, NDELightningModule, GaussianLightningModule
 
 def train(x, y, testxy, model = None, epochs=100, batch_size=32, lr=0.0001, scheduler_type='cosine', extra_blocks=0, checkpoint_path=None, logger=None):
     train_loader, val_loader, test_loader = prepare_dataloaders(x, y, testxy, batch_size)
@@ -211,35 +204,35 @@ def train_model(dataset_name, dataset_size=600, lr=0.00001, epochs=60, batch_siz
 
 train_model('illustris', dataset_size=25000, lr=0.0005, batch_size=128, epochs=400)
 
-# # FINETUNING STAGE 
-# dataset_size = 600
-# lr = 0.00002#
-# # latent_dim = 2
-# latent_dim = 128
-# batch_size = 128
-# # pretrain_checkpoint_path = "/share/gpu0/asaoulis/cmd/checkpoints/run_test/checkpoint-epoch=15-val_log_prob=-3.1550.ckpt" # no wd
-# # pretrain_checkpoint_path = "/share/gpu0/asaoulis/cmd/checkpoints/run_pretrain_nde_resnset_wd_cyclic_0/checkpoint-epoch=22-val_log_prob=-3.0133.ckpt" # no wd 2
-# # pretrain_checkpoint_path = "/share/gpu0/asaoulis/cmd/checkpoints/run_nbody_cyclic_lr0.0002_ds13000_1/checkpoint-epoch=195-val_log_prob=-6.4656.ckpt" # nbody
-# # pretrain_checkpoint_path = "/share/gpu0/asaoulis/cmd/checkpoints/run_astrid_cyclic_eb0_lr0.0002_ds13000_0/checkpoint-epoch=238-val_log_prob=-7.4763.ckpt"
-# pretrain_checkpoint_path = "/share/gpu0/asaoulis/cmd/checkpoints/run_nbody_cyclic_eb0_lr0.0002_ds25000_0/checkpoint-epoch=323-val_log_prob=-7.2038.ckpt"
-# # 5 cosmo param
-# scaling_dataset= 'nbody'
-# # 'cosine', 'cosine_2mult',
-# dataset_name = "illustris"
-# scheduler_type = 'cyclic'
-# for extra_blocks in [4]:
-#     for i in range(1):
-#         train_x, train_y, test_data = get_dataset(dataset_name, dataset_size, scaling_dataset)
-#         train_loader, val_loader, test_loader = prepare_dataloaders(train_y, train_x, test_data, batch_size)
-#         # embedding_model = models.build_resnet(latent_dim, pretrained=True).to(device='cuda')
-#         embedding_model = models.model_o3_err(latent_dim, hidden=12).to(device='cuda')
-#         model = NDELightningModule(embedding_model, conditioning_dim=latent_dim, lr=lr, scheduler_type=scheduler_type,
-#                                         element_names= ["Omega", "sigma8"], test_dataloader = test_loader, optimizer_kwargs = {'weight_decay':0.01, 'betas':(0.9, 0.999)},
-#                                         checkpoint_path=pretrain_checkpoint_path, scheduler_kwargs={'warmup':250, 'gamma':0.96})
-#         model.append_maf_blocks(train_x, train_y, num_extra_blocks=extra_blocks, bounds=(0,1), device='cuda', init_scale=0.02)
-#         try:
-#             logger = wandb.init(project="camels-nbody-illustris-cosmo", name=f"finetune_{dataset_name}_{scaling_dataset}_{scheduler_type}_eb{extra_blocks}_bs{batch_size}_lr{lr}_ds{dataset_size}_{i}", reinit=True)
-#             trained_model = fit_model(model, 250, logger, train_loader, val_loader)
-#         except Exception as e:
-#             import traceback
-#             traceback.print_exception(e)
+# FINETUNING STAGE 
+dataset_size = 600
+lr = 0.00002#
+# latent_dim = 2
+latent_dim = 128
+batch_size = 128
+# pretrain_checkpoint_path = "/share/gpu0/asaoulis/cmd/checkpoints/run_test/checkpoint-epoch=15-val_log_prob=-3.1550.ckpt" # no wd
+# pretrain_checkpoint_path = "/share/gpu0/asaoulis/cmd/checkpoints/run_pretrain_nde_resnset_wd_cyclic_0/checkpoint-epoch=22-val_log_prob=-3.0133.ckpt" # no wd 2
+# pretrain_checkpoint_path = "/share/gpu0/asaoulis/cmd/checkpoints/run_nbody_cyclic_lr0.0002_ds13000_1/checkpoint-epoch=195-val_log_prob=-6.4656.ckpt" # nbody
+# pretrain_checkpoint_path = "/share/gpu0/asaoulis/cmd/checkpoints/run_astrid_cyclic_eb0_lr0.0002_ds13000_0/checkpoint-epoch=238-val_log_prob=-7.4763.ckpt"
+pretrain_checkpoint_path = "/share/gpu0/asaoulis/cmd/checkpoints/run_nbody_cyclic_eb0_lr0.0002_ds25000_0/checkpoint-epoch=323-val_log_prob=-7.2038.ckpt"
+# 5 cosmo param
+scaling_dataset= 'nbody'
+# 'cosine', 'cosine_2mult',
+dataset_name = "illustris"
+scheduler_type = 'cyclic'
+for extra_blocks in [4]:
+    for i in range(1):
+        train_x, train_y, test_data = get_dataset(dataset_name, dataset_size, scaling_dataset)
+        train_loader, val_loader, test_loader = prepare_dataloaders(train_y, train_x, test_data, batch_size)
+        # embedding_model = models.build_resnet(latent_dim, pretrained=True).to(device='cuda')
+        embedding_model = models.model_o3_err(latent_dim, hidden=12).to(device='cuda')
+        model = NDELightningModule(embedding_model, conditioning_dim=latent_dim, lr=lr, scheduler_type=scheduler_type,
+                                        element_names= ["Omega", "sigma8"], test_dataloader = test_loader, optimizer_kwargs = {'weight_decay':0.01, 'betas':(0.9, 0.999)},
+                                        checkpoint_path=pretrain_checkpoint_path, scheduler_kwargs={'warmup':250, 'gamma':0.96})
+        model.append_maf_blocks(train_x, train_y, num_extra_blocks=extra_blocks, bounds=(0,1), device='cuda', init_scale=0.02)
+        try:
+            logger = wandb.init(project="camels-nbody-illustris-cosmo", name=f"finetune_{dataset_name}_{scaling_dataset}_{scheduler_type}_eb{extra_blocks}_bs{batch_size}_lr{lr}_ds{dataset_size}_{i}", reinit=True)
+            trained_model = fit_model(model, 250, logger, train_loader, val_loader)
+        except Exception as e:
+            import traceback
+            traceback.print_exception(e)
