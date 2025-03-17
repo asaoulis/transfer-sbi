@@ -258,8 +258,10 @@ def build_convnext(num_outputs, pretrained=True):
     
     return convnext
 
+
+
 _MODEL_BUILDERS = {
-    "o3": lambda num_outputs, **kwargs: models.model_o3_err(num_outputs, hidden=12).to(device='cuda'),
+    "o3": lambda num_outputs, **kwargs: model_o3_err(num_outputs, hidden=12).to(device='cuda'),
     "resnet": lambda num_outputs, pretrained=True, **kwargs: build_resnet(num_outputs, pretrained=pretrained),
     "convnext": lambda num_outputs, pretrained=True, **kwargs: build_convnext(num_outputs, pretrained=pretrained)
 }

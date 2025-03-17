@@ -2,7 +2,7 @@ import numpy as np
 from sbi import utils as utils
 import torch
 from sbi import inference as inference
-from custom_sbi import CustomSNPE_C, build_maf, build_nsf
+from transfer_sbi.toy.custom_sbi import CustomSNPE_C, build_maf, build_nsf
 import torch.nn as nn
 
 # torch dataset and dataloader

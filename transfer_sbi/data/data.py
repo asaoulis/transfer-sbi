@@ -17,6 +17,9 @@ class DataScaler:
     
     def transform_minmax(self, X):
         return (X - self.min) / (self.max - self.min)
+    
+    def inverse_transform_minmax(self, X):
+        return X * (self.max - self.min) + self.min
 
     def fit_standard(self, X):
         self.mean = X.mean()
@@ -24,6 +27,9 @@ class DataScaler:
     
     def transform_standard(self, X):
         return (X - self.mean) / self.std
+    
+    def inverse_transform_standard(self, X):
+        return X * self.std + self.mean
 
 import numpy as np
 
@@ -42,9 +48,6 @@ def build_train_test_split(params, data, factor=15, n_test=100):
     """
     # Get unique parameter count
     n_unique = params.shape[0]
-    
-    if n_test > n_unique:
-        raise ValueError(f"Cannot allocate {n_test} test samples from only {n_unique} unique parameters.")
 
     # Identify train/test indices (last `n_test` unique samples are test)
     test_ids = np.arange(n_unique - n_test, n_unique)
@@ -54,8 +57,8 @@ def build_train_test_split(params, data, factor=15, n_test=100):
     train_params = np.repeat(params[train_ids], factor, axis=0)
     test_params = np.repeat(params[test_ids], factor, axis=0)
     
-    train_data_ids = np.vstack([train_ids * i for i in range(factor)]).flatten()
-    test_data_ids = np.vstack([test_ids * i for i in range(factor)]).flatten()
+    train_data_ids = np.concatenate([np.arange(i * factor, (i + 1) * factor) for i in train_ids])
+    test_data_ids = np.concatenate([np.arange(i * factor, (i + 1) * factor) for i in test_ids])
 
     train_data = data[train_data_ids]
     test_data = data[test_data_ids]

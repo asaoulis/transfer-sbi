@@ -2,7 +2,7 @@ from config.default import get_default_config
 from config.experiments import experiments
 import sys
 sys.path.append('/home/asaoulis/projects/transfer_sbi/transfer/')
-from transfer_sbi.train.utils import train_model
+from transfer_sbi.eval.utils import evaluate_best_checkpoint
 
 def retrieve_first_list_from_experiments(experiments):
     list_key = None
@@ -16,18 +16,14 @@ def retrieve_first_list_from_experiments(experiments):
 
 if __name__ == "__main__":
     # Extract the list key and its values
-    experiment_name = "finetune_random_LH_illustris"
+    experiment_name = "anneal_LH_illustris"
     experiment_config = experiments[experiment_name]
     list_key, list_values = retrieve_first_list_from_experiments(experiment_config)
 
-    for value in list_values:
-        config = get_default_config()
-        config.experiment_name = experiment_name
-        # Set the non-list values
-        for key, val in experiment_config.items():
-            if key != list_key:
-                setattr(config, key, val)
-        # Set the list value
-        setattr(config, list_key, value)
-        print(f"Running experiment with {list_key}={value}")
-        train_model(config)
+    config = get_default_config()
+    config.experiment_name = experiment_name
+    # Set the non-list values
+    for key, val in experiment_config.items():
+        if key != list_key:
+            setattr(config, key, val)
+    evaluate_best_checkpoint(config)

@@ -15,7 +15,7 @@ def get_default_config():
     config.scheduler_type = 'exp'
     config.model_type = "o3"
     config.optimizer_kwargs = {'weight_decay': 0.01, 'betas': (0.9, 0.999)}
-    config.scheduler_kwargs = {'warmup': 250, 'gamma': 0.96}
+    config.scheduler_kwargs = {'warmup': 250, 'gamma': 0.9}
     config.repeats = 3
     config.experiment_name = None
     return config

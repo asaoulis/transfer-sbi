@@ -1,14 +1,18 @@
 import numpy as np
+from torch.utils.data import DataLoader, random_split, TensorDataset
+from torchvision import transforms
+import torch
+import random
+
 from .data import data_dir, DataScaler, build_train_test_split
 
-
 class DatasetLoader:
-    sampling_set = {'LH': (0,1), 'SB28': (0,1,6,7,8)}
+    sampling_set_cosmo_indices = {'LH': (0,1), 'SB28': (0,1,6,7,8)}
     def __init__(self, dataset_name, sampling_set='SB28'):
         self.dataset_name = dataset_name
         self.sampling_set = sampling_set
+        self.indices = self.sampling_set_cosmo_indices[sampling_set]
         self.params, self.data = self.load_data()
-        self.indices = self.sampling_set[sampling_set]
     
     def load_data(self):
         if self.dataset_name == "illustris":
@@ -33,7 +37,7 @@ class DatasetLoader:
 
 def get_scalers(dataset_name, dataset_suite):
     dataset = DatasetLoader(dataset_name, dataset_suite)
-    x_repeated = dataset.get_repeated_params()
+    x_repeated = dataset.params
     
     param_scaler = DataScaler()
     param_scaler.fit_minmax(x_repeated)
@@ -45,18 +49,31 @@ def get_scalers(dataset_name, dataset_suite):
 
 def get_dataset(dataset_name, dataset_suite, dataset_size, scaling_dataset=None, n_test=2000):
     param_scaler, data_scaler = get_scalers(scaling_dataset or dataset_name, dataset_suite)
+    scalers = (param_scaler, data_scaler)
     dataset = DatasetLoader(dataset_name, dataset_suite)
-    x_scaled = param_scaler.transform_minmax(dataset.get_repeated_params())
+    x_scaled = param_scaler.transform_minmax(dataset.params)
     y_scaled = data_scaler.transform_standard(np.log(dataset.data))
-    x_train, y_train, x_test, y_test = build_train_test_split(x_scaled, y_scaled, n_test)
+    x_train, y_train, x_test, y_test = build_train_test_split(x_scaled, y_scaled, factor=15, n_test= 100)
     # shuffle train data
     idx = np.random.permutation(len(x_train))
     x_train, y_train = x_train[idx], y_train[idx]
-    return x_train[:dataset_size], y_train[:dataset_size], (x_test, y_test)
+    return torch.tensor(x_train[:dataset_size], dtype=torch.float32), torch.tensor(y_train[:dataset_size], dtype=torch.float32).unsqueeze(1), (x_test, y_test), scalers
 
-from torchvision import transforms
-import torch
-import random
+def prepare_dataloaders(x, y, testxy, batch_size):
+    dataset = AugmentDataset(x, y, train_transform)
+    train_size = int(0.9 * len(dataset))
+    val_size = len(dataset) - train_size
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    
+    test_x, test_y = testxy
+    test_dataset = TensorDataset(torch.tensor(test_y, dtype=torch.float32).unsqueeze(1),
+                                 torch.tensor(test_x, dtype=torch.float32))
+    
+    return (DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8),
+            DataLoader(val_dataset, batch_size=batch_size, num_workers=8),
+            DataLoader(test_dataset, batch_size=32, num_workers=8))
+
+
 train_transform = transforms.Compose([
     transforms.RandomHorizontalFlip(p=0.5),
     transforms.RandomVerticalFlip(p=0.5),

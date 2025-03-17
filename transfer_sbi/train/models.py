@@ -1,5 +1,5 @@
 from nflows import flows, transforms
-from custom_sbi import build_maf, build_nsf, build_maf_rqs
+from transfer_sbi.toy.custom_sbi import build_maf, build_nsf, build_maf_rqs
 from typing import NamedTuple
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam, AdamW
@@ -7,7 +7,7 @@ import torch
 from sbi import utils as utils
 from torch.optim import Adam, lr_scheduler
 
-from custom_sbi import CustomSNPE_C
+from transfer_sbi.toy.custom_sbi import CustomSNPE_C
 
 
 class TrainConfig(NamedTuple):

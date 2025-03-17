@@ -7,6 +7,8 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts, CyclicLR, LambdaLR, ReduceLROnPlateau
 import numpy as np
 from sklearn.metrics import r2_score
+from .custom_sbi import CustomSNPE_C
+
 
 class BaseLightningModule(pl.LightningModule):
     def __init__(self, model, loss_fn, lr=0.0001, scheduler_type='cosine', element_names=None, optimizer_kwargs = {}, scheduler_kwargs= {}, **kwargs):
@@ -143,7 +145,7 @@ class GaussianLightningModule(BaseLightningModule):
         return loss
 
 
-from custom_sbi import build_maf, build_maf_rqs, build_nsf
+from transfer_sbi.toy.custom_sbi import build_maf, build_maf_rqs, build_nsf
 from nflows import flows, transforms
 from typing import NamedTuple
 from torch.optim import Adam, AdamW
@@ -235,9 +237,17 @@ class NDELightningModule(BaseLightningModule):
 
     def load_from_checkpoint(self, checkpoint_path):
         """Loads model weights from a given checkpoint."""
-        checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))  # Adjust device as needed
+        checkpoint = torch.load(checkpoint_path, map_location=torch.device('cuda'))  # Adjust device as needed
         self.load_state_dict(checkpoint['state_dict'])  # Ensure the key matches the saved checkpoint format
-        print(f"Loaded model from {checkpoint_path}")
+    
+    def build_posterior_object(self):
+        y_dataset, x_dataset = self.test_dataloader.dataset.tensors
+        dim = x_dataset.shape[1]
+        prior = utils.BoxUniform(low=0 * torch.ones(dim), high=1. * torch.ones(dim), device="cuda")
+        inference_method = CustomSNPE_C(prior=prior, device='cuda')
+        inference_method.append_simulations(x_dataset[:10], y_dataset[:10])
+        posterior_sbi = inference_method.build_posterior(self.model.to('cuda'))
+        return posterior_sbi
 
     def append_maf_blocks(self, cheap_x_dataset, cheap_y_dataset, num_extra_blocks, bounds, device, init_scale = 1.e-2):
         """Appends extra MAF blocks to the pretrained model."""
@@ -284,8 +294,6 @@ class NDELightningModule(BaseLightningModule):
 
     def compute_avg_log_prob(self):
         """Computes the average log probability over the test dataset."""
-        if self.trainer.sanity_checking:  # optional skip
-            return
         predictions = []
         for batch in self.test_dataloader:
             batch = self.transfer_batch_to_device(batch, self.device, 0)
