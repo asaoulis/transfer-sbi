@@ -64,7 +64,7 @@ class BaseLightningModule(pl.LightningModule):
         elif self.scheduler_type == 'cyclic':
             scheduler = CyclicLR(
                 optimizer, base_lr=1e-9, max_lr=self.lr,
-                step_size_up=500, step_size_down=500,
+                step_size_up=1000, step_size_down=1000,
                 cycle_momentum=False
             )
         elif self.scheduler_type == 'plateau':

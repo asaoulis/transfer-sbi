@@ -5,3 +5,4 @@ wandb/
 __pycache__/
 *.pth
 *.log
+*.png

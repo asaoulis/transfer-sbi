@@ -51,16 +51,20 @@ def build_train_test_split(params, data, factor=15, n_test=100):
 
     # Identify train/test indices (last `n_test` unique samples are test)
     test_ids = np.arange(n_unique - n_test, n_unique)
-    train_ids = np.arange(0, n_unique - n_test)
+    valid_ids = np.arange(n_unique - 2 * n_test, n_unique - n_test)
+    train_ids = np.arange(0, n_unique - 2*n_test)
 
     # Repeat parameters accordingly
     train_params = np.repeat(params[train_ids], factor, axis=0)
+    valid_params = np.repeat(params[valid_ids], factor, axis=0)
     test_params = np.repeat(params[test_ids], factor, axis=0)
     
     train_data_ids = np.concatenate([np.arange(i * factor, (i + 1) * factor) for i in train_ids])
     test_data_ids = np.concatenate([np.arange(i * factor, (i + 1) * factor) for i in test_ids])
+    valid_data_ids = np.concatenate([np.arange(i * factor, (i + 1) * factor) for i in valid_ids])
 
     train_data = data[train_data_ids]
     test_data = data[test_data_ids]
+    valid_data = data[valid_data_ids]
 
-    return train_params, train_data, test_params, test_data
+    return train_params, train_data, valid_params, valid_data, test_params, test_data

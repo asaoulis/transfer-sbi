@@ -21,7 +21,7 @@ def prepare_data_and_model(config, data_parameters = None):
     return train_loader,val_loader, model, scalers
 
 def prepare_data_parameters(config):
-    train_x, train_y, test_data, scalers = get_dataset(config.dataset_name, config.dataset_suite, config.dataset_size, config.scaling_dataset)
-    train_loader, val_loader, test_loader = prepare_dataloaders(train_y, train_x, test_data, config.batch_size)
+    train_x, train_y, valid_x, valid_y, test_data, scalers = get_dataset(config.dataset_name, config.dataset_suite, config.dataset_size, config.scaling_dataset)
+    train_loader, val_loader, test_loader = prepare_dataloaders(train_y, train_x, valid_y, valid_x, test_data, config.batch_size)
     return scalers,train_loader,val_loader,test_loader
 

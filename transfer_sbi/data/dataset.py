@@ -53,17 +53,18 @@ def get_dataset(dataset_name, dataset_suite, dataset_size, scaling_dataset=None,
     dataset = DatasetLoader(dataset_name, dataset_suite)
     x_scaled = param_scaler.transform_minmax(dataset.params)
     y_scaled = data_scaler.transform_standard(np.log(dataset.data))
-    x_train, y_train, x_test, y_test = build_train_test_split(x_scaled, y_scaled, factor=15, n_test= 100)
+    x_train, y_train ,x_valid, y_valid, x_test, y_test = build_train_test_split(x_scaled, y_scaled, factor=15, n_test= 100)
     # shuffle train data
     idx = np.random.permutation(len(x_train))
     x_train, y_train = x_train[idx], y_train[idx]
-    return torch.tensor(x_train[:dataset_size], dtype=torch.float32), torch.tensor(y_train[:dataset_size], dtype=torch.float32).unsqueeze(1), (x_test, y_test), scalers
+    valid_idx = np.random.permutation(len(x_valid))
+    x_valid, y_valid = x_valid[valid_idx], y_valid[valid_idx]
+    num_train = int(dataset_size * 0.9)
+    return torch.tensor(x_train[:num_train], dtype=torch.float32), torch.tensor(y_train[:num_train], dtype=torch.float32).unsqueeze(1), torch.tensor(x_valid[:dataset_size-num_train], dtype=torch.float32), torch.tensor(y_valid[:dataset_size-num_train], dtype=torch.float32).unsqueeze(1), (x_test, y_test), scalers
 
-def prepare_dataloaders(x, y, testxy, batch_size):
-    dataset = AugmentDataset(x, y, train_transform)
-    train_size = int(0.9 * len(dataset))
-    val_size = len(dataset) - train_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+def prepare_dataloaders(x, y, v_x, v_y, testxy, batch_size):
+    train_dataset = AugmentDataset(x, y, train_transform)
+    val_dataset = AugmentDataset(v_x, v_y)
     
     test_x, test_y = testxy
     test_dataset = TensorDataset(torch.tensor(test_y, dtype=torch.float32).unsqueeze(1),
