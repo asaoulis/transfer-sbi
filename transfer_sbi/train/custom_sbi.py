@@ -13,6 +13,8 @@ from torch.distributions import Distribution
 from torch.nn.utils.clip_grad import clip_grad_norm_
 from torch.utils import data
 from torch.utils.tensorboard.writer import SummaryWriter
+from sbi.samplers.rejection import rejection
+
 
 from sbi import utils as utils
 from sbi.inference import NeuralInference, check_if_proposal_has_default_x
@@ -34,6 +36,7 @@ from sbi.utils import (
     validate_theta_and_x,
     warn_if_zscoring_changes_data,
     x_shape_from_simulation,
+    within_support
 )
 from sbi.utils.sbiutils import ImproperEmpirical, mask_sims_from_prior
 
@@ -48,6 +51,94 @@ import torch
 
 from torch.utils import data
 from torch.utils.data.sampler import SubsetRandomSampler
+
+def reshape_to_batch_event(theta_or_x, event_shape):
+    """Return theta or x s.t. its shape is `(batch_dim, *event_shape)`.
+
+    Args:
+        theta_or_x: The tensor to be reshaped. Can have any of the following shapes:
+            - (event)
+            - (batch, event)
+        event_shape: The shape of a single datapoint (without batch dimension or sample
+            dimension).
+
+    Returns:
+        A tensor of shape `(batch, event)`.
+    """
+    # `2` for image data, `3` for video data, ...
+    event_shape_dim = len(event_shape)
+
+    trailing_theta_or_x_shape = theta_or_x.shape[-event_shape_dim:]
+    leading_theta_or_x_shape = theta_or_x.shape[:-event_shape_dim]
+    assert trailing_theta_or_x_shape == event_shape, (
+        "The trailing dimensions of `theta_or_x` do not match the `event_shape`."
+    )
+
+    if len(leading_theta_or_x_shape) == 0:
+        # A single datapoint is passed. Add batch artificially.
+        return theta_or_x.unsqueeze(0)
+    elif len(leading_theta_or_x_shape) == 1:
+        # A batch dimension was passed.
+        return theta_or_x
+    else:
+        raise ValueError(
+            f"`len(leading_theta_or_x_shape) = {leading_theta_or_x_shape} > 1`. "
+            f"It is unclear how the additional entries should be interpreted"
+        )
+def sample_batched(
+    self,
+    sample_shape,
+    x: Tensor,
+    condition_shape,
+    max_sampling_batch_size: int = 10_000,
+    show_progress_bars: bool = True,
+) -> Tensor:
+    r"""Given a batch of observations [x_1, ..., x_B] this function samples from
+    posteriors $p(\theta|x_1)$, ... ,$p(\theta|x_B)$, in a batched (i.e. vectorized)
+    manner.
+
+    Args:
+        sample_shape: Desired shape of samples that are drawn from the posterior
+            given every observation.
+        x: A batch of observations, of shape `(batch_dim, event_shape_x)`.
+            `batch_dim` corresponds to the number of observations to be drawn.
+        max_sampling_batch_size: Maximum batch size for rejection sampling.
+        show_progress_bars: Whether to show sampling progress monitor.
+
+    Returns:
+        Samples from the posteriors of shape (*sample_shape, B, *input_shape)
+    """
+    num_samples = torch.Size(sample_shape).numel()
+    x = reshape_to_batch_event(x, event_shape=condition_shape)
+    num_xos = x.shape[0]
+
+    # throw warning if num_x * num_samples is too large
+    if num_xos * num_samples > 2**21:  # 2 million-ish
+        warn(
+            "Note that for batched sampling, the direct posterior sampling "
+            "generates {num_xos} * {num_samples} = {num_xos * num_samples} "
+            "samples. This can be slow and memory-intensive. Consider "
+            "reducing the number of samples or batch size.",
+            stacklevel=2,
+        )
+
+    max_sampling_batch_size = (
+        self.max_sampling_batch_size
+        if max_sampling_batch_size is None
+        else max_sampling_batch_size
+    )
+
+    samples = rejection.accept_reject_sample(
+        proposal=self.posterior_estimator,
+        accept_reject_fn=lambda theta: within_support(self.prior, theta),
+        num_samples=num_samples,
+        show_progress_bars=show_progress_bars,
+        max_sampling_batch_size=max_sampling_batch_size,
+        proposal_sampling_kwargs={"x": x},
+        alternative_method="build_posterior(..., sample_with='mcmc')",
+    )[0]
+
+    return samples
 
 
 class CustomSBITrain:
@@ -279,6 +370,7 @@ class CustomSNLE_A(CustomSBITrain, SNLE_A, LikelihoodEstimator):
         
         SNLE_A.__init__(self, *args, **kwargs)  # Resolves MRO and calls the appropriate __init__
         self._proposal_roundwise = [self._prior]
+
     def _loss(self, theta: Tensor, x: Tensor, *args, **kwargs) -> Tensor:
         r"""Return loss for SNLE, which is the likelihood of $-\log q(x_i | \theta_i)$.
 

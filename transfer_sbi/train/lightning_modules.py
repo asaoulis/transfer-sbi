@@ -7,8 +7,10 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts, CyclicLR, LambdaLR, ReduceLROnPlateau
 import numpy as np
 from sklearn.metrics import r2_score
-from .custom_sbi import CustomSNPE_C
-
+from tqdm import tqdm
+from .custom_sbi import CustomSNPE_C, sample_batched
+from types import MethodType
+from functools import partial
 
 class BaseLightningModule(pl.LightningModule):
     def __init__(self, model, loss_fn, lr=0.0001, scheduler_type='cosine', element_names=None, optimizer_kwargs = {}, scheduler_kwargs= {}, **kwargs):
@@ -233,7 +235,6 @@ class NDELightningModule(BaseLightningModule):
         self.model = self.build_flow(x_dataset, y_dataset, num_transforms=4, z_score_x=None, z_score_y=None, 
                                      embedding_net=embedding_net, hidden_features=128, use_batch_norm=True, 
                                      **self.flow_kwargs)
-        print("Finished model setup", flush=True)
 
     def load_from_checkpoint(self, checkpoint_path):
         """Loads model weights from a given checkpoint."""
@@ -248,6 +249,44 @@ class NDELightningModule(BaseLightningModule):
         inference_method.append_simulations(x_dataset[:10], y_dataset[:10])
         posterior_sbi = inference_method.build_posterior(self.model.to('cuda'))
         return posterior_sbi
+
+    def generate_samples(self, dummy_loader, num_samples=10000):
+        test_y, test_x = self.test_dataloader.dataset.tensors
+        posterior = self.build_posterior_object()
+        test_y = torch.tensor(test_y).to('cuda', dtype=torch.float32).unsqueeze(1)
+        theta0s = []
+        samples = []
+        num_tarp_samples = len(test_x)
+        for i in tqdm(range(num_tarp_samples), desc="Sampling", total=num_tarp_samples):
+            x= test_x[i]
+            y = test_y[i]
+            x_samples = posterior.sample((num_samples,), x=y, show_progress_bars=False)
+            theta0s.append(x)
+            samples.append(x_samples)
+        theta0s = torch.stack(theta0s)
+        samples = torch.stack(samples).permute(1, 0, 2)
+        return theta0s, samples
+    
+
+    def generate_samples_batched(self, test_dataloader, num_samples=10000):
+        """
+        Generates samples from the model using the test dataloader. Doesn't work!
+        
+        Args:
+            test_dataloader (DataLoader): The test dataloader.
+            num_samples (int): Number of samples to generate.
+        
+        Returns:
+            torch.Tensor: Generated samples.
+        """
+        posterior = self.build_posterior_object()
+        all_samples = []
+        for batch in tqdm(test_dataloader, desc="Sampling"):
+            y, x = batch
+            x_samples = posterior.sample_batched((num_samples,), x=y, show_progress_bars=False)
+            all_samples.append(x_samples)
+        all_samples = torch.cat(all_samples, dim=0)
+        return all_samples
 
     def append_maf_blocks(self, cheap_x_dataset, cheap_y_dataset, num_extra_blocks, bounds, device, init_scale = 1.e-2):
         """Appends extra MAF blocks to the pretrained model."""

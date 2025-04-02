@@ -3,11 +3,10 @@ import torch
 import glob
 import re
 import json
-import wandb
-import pytorch_lightning as pl
 from ..utils import prepare_data_and_model
+from .tarp import get_tarp_coverage
 
-from .fom import compute_fom
+from .fom import compute_fom, compute_cov_matrix_per_sim
 
 def find_best_checkpoint(checkpoint_dir):
     checkpoint_files = glob.glob(os.path.join(checkpoint_dir, "checkpoint-epoch=*-val_log_prob=*.ckpt"))
@@ -30,14 +29,114 @@ def find_best_checkpoint(checkpoint_dir):
     
     return best_checkpoint, best_val_loss
 
+def get_best_checkpoint(experiment_path, match_string):
+    run_folders = [os.path.join(experiment_path, d) for d in os.listdir(experiment_path) if os.path.isdir(os.path.join(experiment_path, d))]
+    best_checkpoints = []
+    val_losses = []
+    for run_folder in run_folders:
+        if match_string not in run_folder:
+            continue
+        best_checkpoint, best_val_loss = find_best_checkpoint(run_folder)
+        best_checkpoints.append(best_checkpoint)
+        val_losses.append(best_val_loss)
+    return best_checkpoints, val_losses
 
-def mock_evaluation(model):
+
+def compute_log_prob(model):
     with torch.no_grad():
         test_log_prob = model.compute_avg_log_prob()
     return {"test_log_prob": test_log_prob}
+import torch
+
+def rescale_parameters(tensor, scaler):
+    """
+    Rescales the given tensor using the provided scaler, ensuring the correct shape.
+    
+    Parameters:
+    tensor (torch.Tensor): The input tensor to be rescaled.
+    scaler (object): The scaler object with an `inverse_transform_minmax` method.
+    
+    Returns:
+    torch.Tensor: The rescaled tensor with the original shape.
+    """
+    original_shape = tensor.shape
+    reshaped_tensor = tensor.reshape(-1, original_shape[-1])  # Flatten to (N, d) for scaling
+    scaled_array = scaler.inverse_transform_minmax(reshaped_tensor.cpu().numpy())  # Apply inverse scaling
+    scaled_tensor = torch.tensor(scaled_array, device='cuda', dtype=torch.float32)  # Convert back to tensor
+    return scaled_tensor.reshape(original_shape)  # Restore original shape
+
+def generate_samples_and_run_eval(model, param_scaler, reference_samples=None, compute_calibration=True):
+
+    theta0s, samples = model.generate_samples(model.test_dataloader, num_samples=10000)
+    
+    scaled_theta0s = rescale_parameters(theta0s, param_scaler)
+    scaled_samples = rescale_parameters(samples, param_scaler)
+    sample_means = scaled_samples.mean(axis=0)
+    mse = torch.nn.functional.mse_loss(sample_means, scaled_theta0s, reduction='none')
+    bias = scaled_samples.mean(axis=0) - scaled_theta0s
+
+    eval_metrics = {
+        "fom": compute_fom(samples),  # Compute Figure of Merit
+        "sample_ensemble_mse": mse.mean().item(),  # Mean Squared Error of samples
+    }
+    per_dim_mse = mse.mean(dim=0).cpu().numpy()
+    for dim in range(theta0s.shape[1]):
+        eval_metrics[f"mse_{dim}"] = per_dim_mse[dim].item()
+        eval_metrics[f"bias_{dim}"] = bias.mean(dim=0)[dim].item()
+    cov_matrices = compute_cov_matrix_per_sim(scaled_samples)
+    inv_covariances = torch.linalg.inv(cov_matrices)
+
+    mahalanobis_distances = torch.sqrt(torch.einsum('bi,bij,bj->b', bias, inv_covariances, bias))
+    eval_metrics['mahalanobis_distance_mean'] = mahalanobis_distances.mean().item()
+    eval_metrics['mahalanobis_distance_std'] = mahalanobis_distances.std().item()
+
+    if compute_calibration:
+        coverage = get_tarp_coverage(samples.cpu().numpy(), theta0s.cpu().numpy(), bootstrap=True, num_bootstrap=25)
+        rank_histogram = np.diff(coverage[0].mean(axis=0))
+        rank_histogram *= len(rank_histogram)
+        expected_ranks = np.ones(len(rank_histogram))
+        calibration_error = np.sum((rank_histogram - expected_ranks)**2) 
+        eval_metrics.update({
+            "calibration_error": calibration_error
+        })
+    if reference_samples is not None:
+        reference_samples = reference_samples[:, :samples.shape[1]]
+        scaled_reference_samples = rescale_parameters(torch.tensor(reference_samples), param_scaler)
+        eval_metrics.update({
+            "ref_post_mean_mse": torch.nn.functional.mse_loss(
+                scaled_samples.mean(axis=0), scaled_reference_samples.mean(axis=0)
+            ).item(),
+            "ref_post_cov_mse": torch.nn.functional.mse_loss(
+                compute_cov_matrix_per_sim(scaled_samples), compute_cov_matrix_per_sim(scaled_reference_samples)
+            ).item()
+        })
+
+    return eval_metrics
 
 
-def evaluate_best_checkpoint(config, data_parameters = None):
+def load_best_checkpoint_model(config, run_folder, data_parameters=None):
+    """Find the best checkpoint in a run folder and load its model.
+    
+    Args:
+        config: Configuration object containing experiment settings
+        run_folder: Path to the run folder containing checkpoints
+        data_parameters: Optional data parameters for model preparation
+    
+    Returns:
+        tuple: (model, best_checkpoint_path, best_val_loss) or (None, None, None) if no checkpoint found
+    """
+    best_checkpoint, best_val_loss = find_best_checkpoint(run_folder)
+    if not best_checkpoint:
+        return None, None, None
+    
+    config.checkpoint_path = best_checkpoint
+    _, _, model, _ = prepare_data_and_model(config, data_parameters)
+    model.to("cuda")
+    model.eval()
+    return model, best_checkpoint, best_val_loss
+
+
+def evaluate_best_checkpoint(config, data_parameters=None, reference_samples=None):
     experiment_path = f"/share/gpu0/asaoulis/cmd/checkpoints/{config.experiment_name}"
     if not os.path.exists(experiment_path):
         return
@@ -46,20 +145,19 @@ def evaluate_best_checkpoint(config, data_parameters = None):
     results = {}
     
     for run_folder in run_folders:
-        best_checkpoint, best_val_loss = find_best_checkpoint(run_folder)
-        config.checkpoint_path = best_checkpoint
+        print(run_folder, flush=True)
+        model, best_checkpoint, best_val_loss = load_best_checkpoint_model(config, run_folder, data_parameters)
         
-        if best_checkpoint:            
-            _, _, model, _ = prepare_data_and_model(config, data_parameters)
+        if model:            
+            param_scaler = data_parameters[0][0]
             
-            model.to("cuda")
-            model.eval()
-            metrics = mock_evaluation(model)
+            metrics = compute_log_prob(model)
+            eval_metrics = generate_samples_and_run_eval(model, param_scaler, reference_samples)
             
             results[run_folder] = {
                 "best_checkpoint": best_checkpoint,
                 "best_val_loss": best_val_loss,
-                "metrics": metrics
+                "metrics": {**metrics, **eval_metrics}
             }
             
             results_path = os.path.join(run_folder, "evaluation_results.json")
@@ -68,10 +166,10 @@ def evaluate_best_checkpoint(config, data_parameters = None):
     
     return results
 
-
 import os
 import json
 import numpy as np
+from pathlib import Path
 
 def parse_results(experiment_name, base_path="/share/gpu0/asaoulis/cmd/checkpoints"):
     """
@@ -90,6 +188,15 @@ def parse_results(experiment_name, base_path="/share/gpu0/asaoulis/cmd/checkpoin
     
     results = {}
     aggregated_results = {}
+    ensemble_results ={}
+    # parse ensemble results
+    ensemble_result_paths = Path(experiment_path).glob('ensemble_evaluation_results_*.json')
+    for ensemble_result in ensemble_result_paths:
+        # extract match_string from file name
+        match_string = ensemble_result.name.split('_')[-1].split('.')[0]
+        with open(ensemble_result, "r") as f:
+            results_data = json.load(f)
+            ensemble_results['ensemble_'+match_string] = results_data["metrics"]
     
     for run_folder in run_folders:
         results_file = os.path.join(run_folder, "evaluation_results.json")
@@ -113,6 +220,10 @@ def parse_results(experiment_name, base_path="/share/gpu0/asaoulis/cmd/checkpoin
     
     # Compute mean and standard error for each metric
     final_results = {}
+    for ensemble_name, metrics in ensemble_results.items():
+        final_results[ensemble_name] = {}
+        for metric, values in metrics.items():
+            final_results[ensemble_name][metric] = values
     for base_name, metrics in aggregated_results.items():
         final_results[base_name] = {}
         for metric, values in metrics.items():
@@ -134,32 +245,14 @@ def load_best_model_and_build_posterior(config, ds_string_match="", data_paramet
     for run_folder in run_folders:
         if ds_string_match not in run_folder:
             continue
-        results_path = os.path.join(run_folder, "evaluation_results.json")
-        
-        if os.path.exists(results_path):
-            with open(results_path, "r") as f:
-                results = json.load(f)
-            
-            val_loss = results.get("best_val_loss", float("inf"))
-            checkpoint_path = results.get("best_checkpoint", None)
-            
-            if checkpoint_path and val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_model_path = checkpoint_path
-
-    if best_model_path:
-        print(f"Loading best model from: {best_model_path} with val loss: {best_val_loss}")
-
-        config.checkpoint_path = best_model_path
-        print(best_model_path,best_model_path)
-        _, _, best_model, scalers = prepare_data_and_model(config, data_parameters)  # Assuming a function exists to get config
-        best_model.load_from_checkpoint(best_model_path)
-        best_model.to("cuda" if torch.cuda.is_available() else "cpu")
-        best_model.eval()
-
-        # Build posterior
-        posterior = best_model.build_posterior_object()
-        return posterior, best_model.test_dataloader, scalers
+        model, best_model_path, val_loss = load_best_checkpoint_model(config, run_folder, data_parameters)
+        if model and val_loss < best_val_loss:
+            best_model = model
+            best_model_path = best_model_path
+            best_val_loss = val_loss
+            scalers = data_parameters[0]
+    if best_model is not None:
+        return best_model, best_model.test_dataloader, scalers
     else:
         print("No valid checkpoints found.")
         return None

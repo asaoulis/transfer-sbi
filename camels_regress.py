@@ -1,6 +1,6 @@
+import sys
 from config.default import get_default_config
 from config.experiments import experiments
-import sys
 sys.path.append('/home/asaoulis/projects/transfer_sbi/transfer/')
 from transfer_sbi.train.utils import train_model
 
@@ -12,11 +12,18 @@ def retrieve_first_list_from_experiments(experiments):
             list_key = key
             list_values = value
             break
-    return list_key,list_values
+    return list_key, list_values
 
 if __name__ == "__main__":
-    # Extract the list key and its values
-    experiment_name = "finetune_random_LH_illustris"
+    if len(sys.argv) < 2:
+        print("Usage: python camels_regress.py <experiment_name>")
+        sys.exit(1)
+
+    experiment_name = sys.argv[1]
+    if experiment_name not in experiments:
+        print(f"Error: Experiment '{experiment_name}' not found.")
+        sys.exit(1)
+
     experiment_config = experiments[experiment_name]
     list_key, list_values = retrieve_first_list_from_experiments(experiment_config)
 
@@ -29,5 +36,5 @@ if __name__ == "__main__":
                 setattr(config, key, val)
         # Set the list value
         setattr(config, list_key, value)
-        print(f"Running experiment with {list_key}={value}")
+        print(f"Running experiment '{experiment_name}' with {list_key}={value}")
         train_model(config)

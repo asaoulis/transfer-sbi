@@ -30,25 +30,7 @@ experiments = {
         "epochs": 300,
         "batch_size": 128,
         "scheduler_type": "cyclic"},
-    "baseline_SB": {
-        "dataset_size": [15000],
-        "lr": 0.0002,
-        "epochs": 500,
-        "batch_size": 128,
-        "scheduler_type": "cyclic",
-        "dataset_suite" : "SB28",
-        },
     "finetune_LH_illustris":
-        {"dataset_size": [200, 400, 800, 1600],
-        "lr": 0.00001,
-        "epochs": 100,
-        "batch_size": 64,
-        "scheduler_type": "exp",
-        "dataset_suite": "LH",
-        "checkpoint_path": "/share/gpu0/asaoulis/cmd/checkpoints/pretrain_nbody",
-        "match_string":"ds15000"
-        },
-    "finetune_random_LH_illustris":
         {"dataset_size": [200, 400, 800, 1600],
         "lr": 0.00001,
         "epochs": 100,
@@ -66,17 +48,19 @@ experiments = {
         "scheduler_type": "exp",
         "dataset_suite": "LH",
         "checkpoint_path": "/share/gpu0/asaoulis/cmd/checkpoints/baseline_LH",
-        "match_string":"LH_cyclic_ds15000"
+        "match_string":"LH_cyclic"
         },
-    "anneal_random_LH_illustris":
-        {"dataset_size": [15000],
+    "plotting_LH_illustris":
+        {"dataset_size": [200, 400, 600, 800, 1000],
         "lr": 0.00001,
-        "epochs": 50,
+        "epochs": 100,
         "batch_size": 64,
         "scheduler_type": "exp",
         "dataset_suite": "LH",
-        "checkpoint_path": "/share/gpu0/asaoulis/cmd/checkpoints/baseline_LH",
-        "match_string":"LH_cyclic_ds15000"
+        "checkpoint_path": "/share/gpu0/asaoulis/cmd/checkpoints/pretrain_nbody",
+        "match_string":"LH_cyclic",
+        "repeats": 1,
+        "data_seed": 0
         },
 # SB28 experiments
     "scratch_SB_training_slow":
@@ -90,10 +74,11 @@ experiments = {
     "baseline_SB":
         {"dataset_size": [30000],
         "lr": 0.0002,
-        "scheduler_type": "cylic",
+        "scheduler_type": "cyclic",
         "dataset_suite": "SB28",
         "epochs": 300,
         "batch_size": 64,
+        "repeats": 5,
         "scheduler_kwargs": {'warmup': 1000, 'gamma': 0.995}},
     "pretrain_nbody_SB":
         {"dataset_size": [30000],
@@ -101,7 +86,52 @@ experiments = {
         "lr": 0.0002,
         "scheduler_type": "cyclic",
         "dataset_suite": "SB28",
-        "epochs": 300,
+        "epochs": 200,
         "batch_size": 64,
         "scheduler_kwargs": {'warmup': 250, 'gamma': 0.999}},
+    "finetune_SB_illustris":
+        {"dataset_size": [2400, 3200],#[200, 400, 800, 1600],
+        "lr": 0.00001,
+        "epochs": 100,
+        "batch_size": 64,
+        "scheduler_type": "exp",
+        "dataset_suite": "SB28",
+        "checkpoint_path": "/share/gpu0/asaoulis/cmd/checkpoints/pretrain_nbody_SB",
+        "match_string":"cyclic",
+        "scheduler_kwargs": {'warmup': 1000, 'gamma': 0.995},
+        },
+    "anneal_SB_illustris":
+        {"dataset_size": [30000],
+        "lr": 0.00001,
+        "epochs": 50,
+        "batch_size": 64,
+        "scheduler_type": "exp",
+        "dataset_suite": "SB28",
+        "checkpoint_path": "/share/gpu0/asaoulis/cmd/checkpoints/baseline_SB",
+        "match_string":"SB28_cyclic"
+        },
+
+    # log normal tests
+    "log_normal_tests":
+        {"dataset_name": "log_normal",
+        "dataset_suite": "LH",
+        "dataset_size": [100000],
+        "lr": 0.0004,
+        "epochs": 200,
+        "batch_size": 64,
+        "scheduler_type": "exp",
+        "scheduler_kwargs": {'warmup': 1000, 'gamma': 0.995},
+        "log_normal_dataset_path": "log_normal_data.pkl",
+        },
+    "finetune_log_normal_LH":
+        {"dataset_size": [200, 400, 800, 1600],
+        "lr": 0.00005,
+        "epochs": 100,
+        "batch_size": 64,
+        "scheduler_type": "exp",
+        "dataset_suite": "LH",
+        "checkpoint_path": "/share/gpu0/asaoulis/cmd/checkpoints/log_normal_tests",
+        "match_string":"cyclic",
+        "scheduler_kwargs": {'warmup': 1000, 'gamma': 0.995},
+        },
 }

@@ -47,7 +47,7 @@ def get_scalers(dataset_name, dataset_suite):
     
     return param_scaler, data_scaler
 
-def get_dataset(dataset_name, dataset_suite, dataset_size, scaling_dataset=None, n_test=2000):
+def get_dataset(dataset_name, dataset_suite, dataset_size, scaling_dataset=None, n_test=2000, data_seed = None):
     param_scaler, data_scaler = get_scalers(scaling_dataset or dataset_name, dataset_suite)
     scalers = (param_scaler, data_scaler)
     dataset = DatasetLoader(dataset_name, dataset_suite)
@@ -55,11 +55,16 @@ def get_dataset(dataset_name, dataset_suite, dataset_size, scaling_dataset=None,
     y_scaled = data_scaler.transform_standard(np.log(dataset.data))
     x_train, y_train ,x_valid, y_valid, x_test, y_test = build_train_test_split(x_scaled, y_scaled, factor=15, n_test= 100)
     # shuffle train data
+    if data_seed is not None:
+        np.random.seed(data_seed)
     idx = np.random.permutation(len(x_train))
     x_train, y_train = x_train[idx], y_train[idx]
     valid_idx = np.random.permutation(len(x_valid))
     x_valid, y_valid = x_valid[valid_idx], y_valid[valid_idx]
     num_train = int(dataset_size * 0.9)
+    if data_seed is not None:
+        # randomly undo the seed
+        np.random.seed()
     return torch.tensor(x_train[:num_train], dtype=torch.float32), torch.tensor(y_train[:num_train], dtype=torch.float32).unsqueeze(1), torch.tensor(x_valid[:dataset_size-num_train], dtype=torch.float32), torch.tensor(y_valid[:dataset_size-num_train], dtype=torch.float32).unsqueeze(1), (x_test, y_test), scalers
 
 def prepare_dataloaders(x, y, v_x, v_y, testxy, batch_size):

@@ -18,4 +18,6 @@ def get_default_config():
     config.scheduler_kwargs = {'warmup': 250, 'gamma': 0.9}
     config.repeats = 3
     config.experiment_name = None
+    config.data_seed = None
+    config.log_normal_dataset_path = None
     return config

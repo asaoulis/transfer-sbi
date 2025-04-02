@@ -2,7 +2,7 @@ import torch
 import wandb
 import pytorch_lightning as pl
 import os
-from ..eval.utils import find_best_checkpoint
+from ..eval.utils import find_best_checkpoint, get_best_checkpoint
 from ..utils import prepare_data_and_model
 
 def fit_model(model, epochs, logger, train_loader, val_loader, experiment_name):
@@ -27,20 +27,12 @@ def fit_model(model, epochs, logger, train_loader, val_loader, experiment_name):
     
     trainer.fit(model, train_loader, val_loader)
 
-def get_best_checkpoint(experiment_path, match_string):
-    run_folders = [os.path.join(experiment_path, d) for d in os.listdir(experiment_path) if os.path.isdir(os.path.join(experiment_path, d))]
-    best_checkpoints = []
-    for run_folder in run_folders:
-        if match_string not in run_folder:
-            continue
-        best_checkpoint, best_val_loss = find_best_checkpoint(run_folder)
-        best_checkpoints.append(best_checkpoint)
-    return best_checkpoints
+
 def train_model(config):
     pretrain = config.checkpoint_path is None
     if not pretrain:
-        best_checkpoints = get_best_checkpoint(config.checkpoint_path, config.match_string)
-    for i in range(config.repeats):
+        best_checkpoints, _ = get_best_checkpoint(config.checkpoint_path, config.match_string)
+    for i in range(3,6):
         config.checkpoint_path = best_checkpoints[i] if not pretrain else None
         train_loader, val_loader, model, _ = prepare_data_and_model(config)
         
