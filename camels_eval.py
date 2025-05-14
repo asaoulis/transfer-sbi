@@ -45,13 +45,25 @@ def load_accurate_ensemble_samples(config):
 
 from transfer_sbi.utils import prepare_data_parameters
 
-base_config = 'finetune_log_normal_LH'
+base_config = 'scratch_LH_Mtot'
 
 experiments_to_evaluate = [
-    # "anneal_SB_illustris", 
-     "finetune_log_normal_LH", 
-    #  "scratch_SB_training_slow",
-    #  "baseline_SB"
+    # "unpaired_LH_illustris",
+    "freeze_CNN_LH_illustris"
+    # "scratch_LH_long"
+]
+
+# experiments_to_evaluate = [
+#     # "anneal_SB_illustris", 
+#      "finetune_SB_illustris", 
+#     #  "scratch_SB_training_slow",
+#     #  "baseline_SB"
+# ]
+
+experiments_to_evaluate = [
+    "scratch_LH_Mtot",
+    "finetune_LH_illustris_Mtot",
+    "baseline_LH_Mtot"
 ]
 
 config = load_config(base_config)

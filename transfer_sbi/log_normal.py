@@ -29,9 +29,12 @@ DEFAULT_COSMOLOGY = {'omega_b': parameters[0],
 
 from nbodykit.lab import  ArrayMesh, FFTPower
 
-def calc_ps_from_field_nbodykit(delta, BoxSize=[25, 25], kmin=1.e-1, kmax=20, dk=7e-3):
-    overdensity = delta/np.mean(delta)
-    overdensity -= 1.0 
+def calc_ps_from_field_nbodykit(delta, BoxSize=[25, 25], kmin=1.e-1, kmax=20, dk=7e-3, already_overdensity=False):
+    if already_overdensity:
+        overdensity = delta
+    else:
+        overdensity = delta/np.mean(delta)
+        overdensity -= 1.0 
     field_mesh = ArrayMesh(overdensity, BoxSize=BoxSize)
     r_2d = FFTPower(field_mesh, mode='1d', kmin=kmin, kmax=kmax)#, dk=dk)
     return r_2d.power['k'], r_2d.power['power'].real

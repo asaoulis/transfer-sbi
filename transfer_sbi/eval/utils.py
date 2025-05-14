@@ -66,7 +66,7 @@ def rescale_parameters(tensor, scaler):
     return scaled_tensor.reshape(original_shape)  # Restore original shape
 
 def generate_samples_and_run_eval(model, param_scaler, reference_samples=None, compute_calibration=True):
-
+    
     theta0s, samples = model.generate_samples(model.test_dataloader, num_samples=10000)
     
     scaled_theta0s = rescale_parameters(theta0s, param_scaler)
@@ -95,7 +95,7 @@ def generate_samples_and_run_eval(model, param_scaler, reference_samples=None, c
         rank_histogram = np.diff(coverage[0].mean(axis=0))
         rank_histogram *= len(rank_histogram)
         expected_ranks = np.ones(len(rank_histogram))
-        calibration_error = np.sum((rank_histogram - expected_ranks)**2) 
+        calibration_error = np.mean((rank_histogram - expected_ranks)**2) 
         eval_metrics.update({
             "calibration_error": calibration_error
         })
@@ -145,6 +145,9 @@ def evaluate_best_checkpoint(config, data_parameters=None, reference_samples=Non
     results = {}
     
     for run_folder in run_folders:
+        # only run if ds1200 or ds2400 in run foler
+        # if "ds1200" not in run_folder and "ds2400" not in run_folder:
+        #     continue
         print(run_folder, flush=True)
         model, best_checkpoint, best_val_loss = load_best_checkpoint_model(config, run_folder, data_parameters)
         
@@ -223,11 +226,15 @@ def parse_results(experiment_name, base_path="/share/gpu0/asaoulis/cmd/checkpoin
     for ensemble_name, metrics in ensemble_results.items():
         final_results[ensemble_name] = {}
         for metric, values in metrics.items():
+            if metric == "fom":
+                values = values
             final_results[ensemble_name][metric] = values
     for base_name, metrics in aggregated_results.items():
         final_results[base_name] = {}
         for metric, values in metrics.items():
             values = np.array(values)
+            if metric == "calibration_error":
+                values = values
             mean = np.mean(values)
             stderr = np.std(values, ddof=1) / np.sqrt(len(values))  # Standard error
             final_results[base_name][metric] = {"mean": mean, "stderr": stderr}

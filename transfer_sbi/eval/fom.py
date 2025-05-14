@@ -37,5 +37,5 @@ def compute_fom(samples):
     cov_matrix = compute_cov_matrix_per_sim(samples) # Compute covariance matrix
     det_cov = torch.linalg.det(cov_matrix)  # Determinant of covariance matrix
 
-    fom = 1.0 / torch.sqrt(det_cov)  # Compute Figure of Merit
+    fom = 1.0 / (det_cov)**(samples.shape[1])  # Compute Figure of Merit 
     return fom.mean().item()

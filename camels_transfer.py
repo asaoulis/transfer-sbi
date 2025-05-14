@@ -45,7 +45,7 @@ for name, (data, params) in objs.items():
 
 
 # %%
-from models import MAFPretrainFineTune, TrainConfig
+from train.models import MAFPretrainFineTune, TrainConfig
 
 # %%
 class MinMaxScaler:
@@ -189,7 +189,7 @@ def build_convnext(num_outputs, pretrained=True):
     
     return convnext
 # %%
-from models import TrainConfig
+from train.models import TrainConfig
 from typing import NamedTuple
 
 class TrainConfig(NamedTuple):
@@ -229,7 +229,7 @@ cheap_y_pretrain.unsqueeze(1).shape
 # %%
 import wandb
 from copy import deepcopy
-from models import prep_test_dataloader
+from train.models import prep_test_dataloader
 
 model_builder = {'convnext': build_convnext, 'resnet': build_resnet}
 confs = [('resnet', 0.00001, 256)]

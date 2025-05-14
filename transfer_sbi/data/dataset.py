@@ -8,16 +8,25 @@ from .data import data_dir, DataScaler, build_train_test_split
 
 class DatasetLoader:
     sampling_set_cosmo_indices = {'LH': (0,1), 'SB28': (0,1,6,7,8)}
-    def __init__(self, dataset_name, sampling_set='SB28'):
+    def __init__(self, dataset_name, sampling_set='SB28', all_params = False):
         self.dataset_name = dataset_name
         self.sampling_set = sampling_set
-        self.indices = self.sampling_set_cosmo_indices[sampling_set]
+        if not all_params:
+            self.indices = self.sampling_set_cosmo_indices[sampling_set]
+        else:
+            self.indices = slice(None)
         self.params, self.data = self.load_data()
     
     def load_data(self):
         if self.dataset_name == "illustris":
             params_file = data_dir / f'params_{self.sampling_set}_IllustrisTNG.txt'
             data_file = data_dir / f'Maps_Mcdm_IllustrisTNG_{self.sampling_set}_z=0.00.npy'
+        elif self.dataset_name == "illustris_Mtot":
+            params_file = data_dir / f'params_{self.sampling_set}_IllustrisTNG.txt'
+            data_file = data_dir / f'Maps_Mtot_IllustrisTNG_{self.sampling_set}_z=0.00.npy'
+        elif self.dataset_name == "illustris_T":
+            params_file = data_dir / f'params_{self.sampling_set}_IllustrisTNG.txt'
+            data_file = data_dir / f'Maps_T_IllustrisTNG_{self.sampling_set}_z=0.00.npy'
         elif self.dataset_name == "astrid":
             params_file = data_dir / 'params_LH_Astrid.txt'
             data_file = data_dir / 'Maps_Mcdm_Astrid_LH_z=0.00.npy'
@@ -47,7 +56,7 @@ def get_scalers(dataset_name, dataset_suite):
     
     return param_scaler, data_scaler
 
-def get_dataset(dataset_name, dataset_suite, dataset_size, scaling_dataset=None, n_test=2000, data_seed = None):
+def get_dataset(dataset_name, dataset_suite, dataset_size, scaling_dataset=None, n_test=2000, data_seed = None, unpaired=False):
     param_scaler, data_scaler = get_scalers(scaling_dataset or dataset_name, dataset_suite)
     scalers = (param_scaler, data_scaler)
     dataset = DatasetLoader(dataset_name, dataset_suite)
@@ -65,6 +74,10 @@ def get_dataset(dataset_name, dataset_suite, dataset_size, scaling_dataset=None,
     if data_seed is not None:
         # randomly undo the seed
         np.random.seed()
+    if unpaired:
+        # hack to do some training with unpaired data
+        x_train = x_valid[::-1]
+        y_train = y_valid[::-1]
     return torch.tensor(x_train[:num_train], dtype=torch.float32), torch.tensor(y_train[:num_train], dtype=torch.float32).unsqueeze(1), torch.tensor(x_valid[:dataset_size-num_train], dtype=torch.float32), torch.tensor(y_valid[:dataset_size-num_train], dtype=torch.float32).unsqueeze(1), (x_test, y_test), scalers
 
 def prepare_dataloaders(x, y, v_x, v_y, testxy, batch_size):

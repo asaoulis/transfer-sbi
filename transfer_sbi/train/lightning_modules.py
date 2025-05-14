@@ -13,7 +13,7 @@ from types import MethodType
 from functools import partial
 
 class BaseLightningModule(pl.LightningModule):
-    def __init__(self, model, loss_fn, lr=0.0001, scheduler_type='cosine', element_names=None, optimizer_kwargs = {}, scheduler_kwargs= {}, **kwargs):
+    def __init__(self, model, loss_fn, lr=0.0001, scheduler_type='cosine', element_names=None, optimizer_kwargs = {}, scheduler_kwargs= {}, freeze_CNN=False, **kwargs):
         super().__init__()
         self.model = model
         self.loss_fn = loss_fn  # Loss function is now dynamic
@@ -24,6 +24,7 @@ class BaseLightningModule(pl.LightningModule):
         self.loss_name = ''
         self.optimizer_kwargs = optimizer_kwargs
         self.scheduler_kwargs = scheduler_kwargs
+        self.freeze_CNN = freeze_CNN
 
     def forward(self, x, cond):
         return self.model(x)
@@ -55,7 +56,10 @@ class BaseLightningModule(pl.LightningModule):
         default_optimizer_kwargs = dict(weight_decay=3.53e-7, betas=(0.5, 0.999))
         optimizer_kwargs = {**default_optimizer_kwargs, **self.optimizer_kwargs}
         print(optimizer_kwargs)
-        optimizer = AdamW(self.model.parameters(), lr=self.lr, **optimizer_kwargs)
+        if self.freeze_CNN:
+            optimizer = Adam(self.model._transform.parameters(), lr=self.lr, **optimizer_kwargs)
+        else:
+            optimizer = AdamW(self.model.parameters(), lr=self.lr, **optimizer_kwargs)
         # optimizer = AdamW(self.model._transform.parameters(), lr=self.lr, **optimizer_kwargs)
         interval = "step"
 
@@ -213,7 +217,7 @@ from functools import partial
 class NDELightningModule(BaseLightningModule):
     flow_type_map = {"nsf": build_nsf, "maf": build_maf, "rqs": build_maf_rqs}
 
-    def __init__(self, model, conditioning_dim, lr=0.0001, scheduler_type='cosine', test_dataloader=None, flow_type='nsf', num_extra_blocks=None, checkpoint_path=None, **kwargs):
+    def __init__(self, model, conditioning_dim, lr=0.0001, scheduler_type='cosine', test_dataloader=None, flow_type='nsf', num_extra_blocks=None, checkpoint_path=None,  **kwargs):
         super().__init__(model, loss_fn=None, lr=lr, scheduler_type=scheduler_type, **kwargs)
         embedding_net = model if model is not None else nn.Identity()
         self.conditioning_dim = conditioning_dim
@@ -260,7 +264,10 @@ class NDELightningModule(BaseLightningModule):
         for i in tqdm(range(num_tarp_samples), desc="Sampling", total=num_tarp_samples):
             x= test_x[i]
             y = test_y[i]
-            x_samples = posterior.sample((num_samples,), x=y, show_progress_bars=False)
+            try:
+                x_samples = posterior.sample((num_samples,), x=y, show_progress_bars=False)
+            except:
+                pass
             theta0s.append(x)
             samples.append(x_samples)
         theta0s = torch.stack(theta0s)

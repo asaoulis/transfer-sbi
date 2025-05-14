@@ -31,7 +31,7 @@ experiments = {
         "batch_size": 128,
         "scheduler_type": "cyclic"},
     "finetune_LH_illustris":
-        {"dataset_size": [200, 400, 800, 1600],
+        {"dataset_size": [200, 400, 800, 1200, 1600, 2400],
         "lr": 0.00001,
         "epochs": 100,
         "batch_size": 64,
@@ -62,6 +62,94 @@ experiments = {
         "repeats": 1,
         "data_seed": 0
         },
+    "unpaired_LH_illustris":
+        {"dataset_size": [200, 400, 800, 1200],
+        "lr": 0.00001,
+        "epochs": 100,
+        "batch_size": 64,
+        "scheduler_type": "exp",
+        "dataset_suite": "LH",
+        "checkpoint_path": "/share/gpu0/asaoulis/cmd/checkpoints/pretrain_nbody",
+        "match_string":"LH_cyclic",
+        "repeats": 3,
+        "unpaired": True
+        },
+    "freeze_CNN_LH_illustris":
+        {"dataset_size": [15000],
+        "lr": 0.0001,
+        "epochs": 100,
+        "batch_size": 64,
+        "scheduler_kwargs": {'warmup': 1000, 'gamma': 0.98},
+        "scheduler_type": "exp",
+        "dataset_suite": "LH",
+        "checkpoint_path": "/share/gpu0/asaoulis/cmd/checkpoints/finetune_LH_illustris",
+        "match_string":"ds2400",
+        "freeze_cnn":True,
+        "repeats": 3,
+        },
+
+# Mtot experiments
+    "scratch_LH_Mtot":
+        {"dataset_size": [200, 400, 800, 1600, 3200, 6400],
+         "dataset_name": "illustris_Mtot",
+        "lr": 0.0002,
+        "epochs": 200,
+        "batch_size": 64,
+        "scheduler_kwargs": {'warmup': 1000, 'gamma': 0.98},
+        "repeats": 3,},
+    "finetune_LH_illustris_Mtot":
+        {"dataset_size": [200, 400, 800, 1200, 1600, 2400],
+        "lr": 0.00001,
+        "epochs": 100,
+        "batch_size": 64,
+        "scheduler_type": "exp",
+        "dataset_name": "illustris_Mtot",
+        "dataset_suite": "LH",
+        "checkpoint_path": "/share/gpu0/asaoulis/cmd/checkpoints/pretrain_nbody",
+        "match_string":"cyclic"
+        },
+    "baseline_LH_Mtot":
+        {"dataset_size": [15000],
+        "lr": 0.0002,
+        "repeats": 3,
+        "scheduler_type": "cyclic",
+        "dataset_suite": "LH",
+        "dataset_name": "illustris_Mtot",
+        "epochs": 250,
+        "batch_size": 64,
+        "scheduler_kwargs": {'warmup': 1000, 'gamma': 0.995}},
+# T experiments
+    "scratch_LH_T":
+        {"dataset_size": [200, 400, 800, 1600, 3200, 6400],
+         "dataset_name": "illustris_T",
+        "lr": 0.0002,
+        "epochs": 200,
+        "batch_size": 64,
+        "scheduler_kwargs": {'warmup': 1000, 'gamma': 0.98},
+        "repeats": 3,},
+    "finetune_LH_illustris_T_final":
+        {"dataset_size": [200, 400, 800, 1200, 1600, 2400],
+        "lr": 0.00004,
+        "epochs": 200,
+        "batch_size": 64,
+        "scheduler_type": "exp",
+        "dataset_name": "illustris_T",
+        "dataset_suite": "LH",
+        "checkpoint_path": "/share/gpu0/asaoulis/cmd/checkpoints/pretrain_nbody",
+        "match_string":"cyclic",
+        "repeats": 3,
+        "scheduler_kwargs": {'warmup': 1000, 'gamma': 0.95}
+        },
+    "baseline_LH_T":
+        {"dataset_size": [15000],
+        "lr": 0.00015,
+        "repeats": 3,
+        "scheduler_type": "cyclic",
+        "dataset_suite": "LH",
+        "dataset_name": "illustris_T",
+        "epochs": 250,
+        "batch_size": 64,
+        "scheduler_kwargs": {'warmup': 1000, 'gamma': 0.995}},
 # SB28 experiments
     "scratch_SB_training_slow":
         {"dataset_size": [200, 400, 800, 1600, 3200, 6400, 12800],
@@ -90,7 +178,9 @@ experiments = {
         "batch_size": 64,
         "scheduler_kwargs": {'warmup': 250, 'gamma': 0.999}},
     "finetune_SB_illustris":
-        {"dataset_size": [2400, 3200],#[200, 400, 800, 1600],
+        {
+        # "dataset_size": [200, 400, 800, 1600, 2400, 3200],
+        "dataset_size": [4000],
         "lr": 0.00001,
         "epochs": 100,
         "batch_size": 64,

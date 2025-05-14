@@ -32,14 +32,14 @@ def train_model(config):
     pretrain = config.checkpoint_path is None
     if not pretrain:
         best_checkpoints, _ = get_best_checkpoint(config.checkpoint_path, config.match_string)
-    for i in range(3,6):
+    for i in range(config.repeats):
         config.checkpoint_path = best_checkpoints[i] if not pretrain else None
         train_loader, val_loader, model, _ = prepare_data_and_model(config)
-        
+        match_string_logger = config.match_string if config.match_string else ""
         logger = wandb.init(
             project="camels-nbody-illustris-paper-SB",
             group=config.experiment_name,
-            name=f"{'pretrain' if pretrain else 'finetune'}_{config.dataset_name}_{config.dataset_suite}_{config.scheduler_type}_{config.lr}_ds{config.dataset_size}_{i}",
+            name=f"{'pretrain' if pretrain else 'finetune'}_{config.dataset_name}_{config.dataset_suite}_{config.scheduler_type}_{config.lr}_{match_string_logger}_ds{config.dataset_size}_{i}",
             reinit=True
         )
 
